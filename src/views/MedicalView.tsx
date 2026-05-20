@@ -16,8 +16,7 @@ export const MedicalView = () => {
       .from('medical_appointments')
       .select('*')
       .gte('appointment_time', nowStr)
-      .order('appointment_time', { ascending: true })
-      .limit(1);
+      .order('appointment_time', { ascending: true });
     if (aptData) setAppointments(aptData);
 
     const { data: medData } = await supabase
@@ -101,27 +100,86 @@ export const MedicalView = () => {
       className="space-y-8 pb-32"
     >
       <section className="space-y-4">
-        <h2 className="text-3xl font-extrabold">下次看診預約</h2>
-        {appointments.length > 0 ? appointments.map((apt, i) => (
-          <div key={i} className="bg-surface border-2 border-surface-container-highest rounded-xl p-6 space-y-6 shadow-sm">
-            <div className="flex items-center gap-4">
-              <img alt={apt.doctor_name} className="w-20 h-20 rounded-full border-2 border-primary object-cover" src={apt.doctor_avatar || "https://lh3.googleusercontent.com/aida-public/AB6AXuD13m5TlhYa2uc5dcRm-ajdWTQ4dks3JlpDtpFpkW4veK99SBbztQ2hOYNCsVM4Wx_-fUHQSUtjwcUhiB9hm3-Zetyyw8SHSdXhVRzvQPxxizWCD1zV4mWVnCdWGcbC-5_CMZbDULZdgMzdCAHHlwMdBg7wmgdFxW3DOvBOCMqI8OzPTjO09iOHHhTpBvERtINTd1iKoq9tNohg-I46KkVkdRogl2FLEoX2Y2Vyb6PrgmNMycD77vviE_KNp2wVqRido4eGtLbYxKM"}/>
-              <div>
-                <p className="text-2xl font-extrabold">{apt.doctor_name}</p>
-                <p className="text-secondary font-bold text-xl uppercase">{apt.specialty}</p>
+        <h2 className="text-3xl font-extrabold flex items-center gap-2">
+          <Calendar className="text-primary" size={32} />
+          看診行程安排
+        </h2>
+        
+        {appointments.length > 0 ? (
+          <div className="space-y-6">
+            {/* Featured Nearest Card */}
+            <div className="bg-gradient-to-r from-primary-container to-secondary-container border-2 border-primary rounded-2xl p-6 space-y-6 shadow-md relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
+              <div className="flex items-center gap-4 relative z-10">
+                <img 
+                  alt={appointments[0].doctor_name} 
+                  className="w-20 h-20 rounded-full border-2 border-primary object-cover shadow-sm bg-white" 
+                  src={appointments[0].doctor_avatar || "https://lh3.googleusercontent.com/aida-public/AB6AXuD13m5TlhYa2uc5dcRm-ajdWTQ4dks3JlpDtpFpkW4veK99SBbztQ2hOYNCsVM4Wx_-fUHQSUtjwcUhiB9hm3-Zetyyw8SHSdXhVRzvQPxxizWCD1zV4mWVnCdWGcbC-5_CMZbDULZdgMzdCAHHlwMdBg7wmgdFxW3DOvBOCMqI8OzPTjO09iOHHhTpBvERtINTd1iKoq9tNohg-I46KkVkdRogl2FLEoX2Y2Vyb6PrgmNMycD77vviE_KNp2wVqRido4eGtLbYxKM"}
+                />
+                <div>
+                  <span className="bg-primary text-on-primary px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm mb-1.5 inline-block">
+                    最近期看診
+                  </span>
+                  <p className="text-2xl font-extrabold text-on-primary-container">{appointments[0].doctor_name}</p>
+                  <p className="text-secondary font-bold text-xl uppercase">{appointments[0].specialty}</p>
+                </div>
+              </div>
+              <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 flex items-center justify-between border border-primary/20 shadow-inner">
+                <div className="flex items-center gap-3">
+                  <Calendar size={24} className="text-primary" />
+                  <span className="font-extrabold text-xl text-primary">
+                    {new Date(appointments[0].appointment_time).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', weekday: 'short' })}
+                  </span>
+                </div>
+                <span className="bg-primary/10 text-primary px-3 py-1 rounded-full font-black text-sm border border-primary/20">已預約</span>
               </div>
             </div>
-            <div className="bg-secondary-container rounded-lg p-4 flex items-center justify-between border-2 border-secondary">
-              <div className="flex items-center gap-3">
-                <Calendar size={24} className="text-secondary" />
-                <span className="font-bold text-xl text-on-secondary-container">
-                  {new Date(apt.appointment_time).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </span>
+
+            {/* Compact Agenda List of All Scheduled Appointments */}
+            {appointments.length > 0 && (
+              <div className="space-y-3 bg-surface-container-lowest border-2 border-surface-container-highest rounded-2xl p-5 shadow-sm">
+                <h3 className="text-xl font-extrabold text-on-surface flex items-center gap-2 border-b pb-3 mb-1">
+                  📅 所有已安排項目 ({appointments.length})
+                </h3>
+                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                  {appointments.map((apt, index) => (
+                    <div 
+                      key={apt.id || index} 
+                      className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                        index === 0 
+                          ? 'bg-primary-container/25 border-primary/30 hover:bg-primary-container/35 shadow-sm' 
+                          : 'bg-surface border-outline-variant hover:bg-surface-container-high'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <img 
+                          alt={apt.doctor_name} 
+                          className="w-12 h-12 rounded-full border border-outline object-cover bg-white" 
+                          src={apt.doctor_avatar || "https://lh3.googleusercontent.com/aida-public/AB6AXuD13m5TlhYa2uc5dcRm-ajdWTQ4dks3JlpDtpFpkW4veK99SBbztQ2hOYNCsVM4Wx_-fUHQSUtjwcUhiB9hm3-Zetyyw8SHSdXhVRzvQPxxizWCD1zV4mWVnCdWGcbC-5_CMZbDULZdgMzdCAHHlwMdBg7wmgdFxW3DOvBOCMqI8OzPTjO09iOHHhTpBvERtINTd1iKoq9tNohg-I46KkVkdRogl2FLEoX2Y2Vyb6PrgmNMycD77vviE_KNp2wVqRido4eGtLbYxKM"}
+                        />
+                        <div>
+                          <p className="font-bold text-lg text-on-surface flex items-center gap-1.5">
+                            {apt.doctor_name}
+                            {index === 0 && <span className="bg-primary/20 text-primary text-[10px] px-1.5 py-0.5 rounded font-black">最近</span>}
+                          </p>
+                          <p className="text-sm font-bold text-secondary uppercase">{apt.specialty}</p>
+                        </div>
+                      </div>
+                      <div className="text-right flex flex-col items-end gap-0.5">
+                        <span className="font-bold text-base text-on-surface-variant">
+                          {new Date(apt.appointment_time).toLocaleString('zh-TW', { month: 'short', day: 'numeric', weekday: 'short' })}
+                        </span>
+                        <span className="font-black text-sm text-primary">
+                          {new Date(apt.appointment_time).toLocaleString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <span className="bg-white px-3 py-1 rounded-full text-secondary font-bold text-sm">已預約</span>
-            </div>
+            )}
           </div>
-        )) : (
+        ) : (
           <div className="bg-surface border-2 border-dashed border-surface-container-highest rounded-xl p-8 flex flex-col items-center justify-center text-center shadow-sm">
             <Calendar size={48} className="text-secondary opacity-50 mb-4" />
             <p className="text-xl font-bold text-on-surface-variant">目前沒有預約看診</p>

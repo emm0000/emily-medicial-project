@@ -14,6 +14,7 @@ export const ManageView = ({ currentUser }: { currentUser: UserProfile }) => {
   const [family, setFamily] = useState({ author_name: currentUser?.name || '照護者', content: '', image_url: '' });
   const [appointment, setAppointment] = useState({ doctor_name: '', specialty: '', appointment_time: '' });
   const [medication, setMedication] = useState({ label: '', description: '', scheduled_time: '', icon: 'pill', color: 'bg-primary-container' });
+  const [medicationDuration, setMedicationDuration] = useState('長期服用');
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [deliveryForm, setDeliveryForm] = useState({ order_number: '', items: '', expected_delivery: '', status: 'ordered' });
 
@@ -159,9 +160,13 @@ export const ManageView = ({ currentUser }: { currentUser: UserProfile }) => {
   const handleMedicationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    const finalDescription = medicationDuration === '長期服用' 
+      ? medication.description 
+      : `${medication.description} • 連續服用 ${medicationDuration}`;
+
     const { error } = await supabase.from('medications').insert([{
       label: medication.label,
-      description: medication.description,
+      description: finalDescription,
       scheduled_time: medication.scheduled_time, // e.g. "08:00"
       icon: medication.icon,
       color: medication.color,
@@ -173,6 +178,7 @@ export const ManageView = ({ currentUser }: { currentUser: UserProfile }) => {
     } else {
       showSuccess('用藥排程已成功新增！');
       setMedication({ label: '', description: '', scheduled_time: '', icon: 'pill', color: 'bg-primary-container' });
+      setMedicationDuration('長期服用');
     }
   };
 
@@ -458,6 +464,22 @@ export const ManageView = ({ currentUser }: { currentUser: UserProfile }) => {
                     <option value="止痛藥 1 顆">止痛藥 1 顆</option>
                     <option value="心臟科藥物 1 顆">心臟科藥物 1 顆</option>
                     <option value="鈣片 1 錠">鈣片 1 錠</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="font-bold text-on-surface-variant">用藥天數 (期間)</label>
+                  <select 
+                    required 
+                    value={medicationDuration} 
+                    onChange={e => setMedicationDuration(e.target.value)} 
+                    className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl appearance-none"
+                  >
+                    <option value="長期服用">長期服用 (不限期)</option>
+                    <option value="3 天">連續服用 3 天</option>
+                    <option value="7 天">連續服用 7 天</option>
+                    <option value="14 天">連續服用 14 天</option>
+                    <option value="28 天">連續服用 28 天</option>
+                    <option value="30 天">連續服用 30 天</option>
                   </select>
                 </div>
                 <div className="space-y-2">
