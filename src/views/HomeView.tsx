@@ -132,7 +132,13 @@ export const HomeView = ({ setView }: { setView: (v: 'home' | 'health' | 'family
           </span>
           <ChevronRight className="text-white" />
         </button>
-        <button onClick={() => setView('family')} className="w-full bg-tertiary-container text-on-tertiary-container h-16 rounded-xl flex items-center justify-between px-8 border-2 border-on-tertiary-fixed-variant active:scale-[0.98] transition-all">
+        <button 
+          onClick={() => {
+            localStorage.setItem('scroll_to_album', 'true');
+            setView('family');
+          }} 
+          className="w-full bg-tertiary-container text-on-tertiary-container h-16 rounded-xl flex items-center justify-between px-8 border-2 border-on-tertiary-fixed-variant active:scale-[0.98] transition-all"
+        >
           <span className="flex items-center gap-4">
             <ImageIcon className="text-white" />
             <span className="font-bold text-xl text-white">家庭相簿</span>

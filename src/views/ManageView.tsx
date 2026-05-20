@@ -1,18 +1,99 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Settings, Activity, Users, Calendar, Pill, CheckCircle2 } from 'lucide-react';
+import { Settings, Activity, Users, Calendar, CheckCircle2, Truck, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { UserProfile } from '../App';
 
-export const ManageView = () => {
+export const ManageView = ({ currentUser }: { currentUser: UserProfile }) => {
   const [activeTab, setActiveTab] = useState<'health' | 'family' | 'medical'>('health');
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
   // Form states
   const [health, setHealth] = useState({ steps: '', heart_rate: '', systolic: '', diastolic: '' });
-  const [family, setFamily] = useState({ author_name: '照護者', content: '', image_url: '' });
+  const [family, setFamily] = useState({ author_name: currentUser?.name || '照護者', content: '', image_url: '' });
   const [appointment, setAppointment] = useState({ doctor_name: '', specialty: '', appointment_time: '' });
   const [medication, setMedication] = useState({ label: '', description: '', scheduled_time: '', icon: 'pill', color: 'bg-primary-container' });
+  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [deliveryForm, setDeliveryForm] = useState({ order_number: '', items: '', expected_delivery: '', status: 'ordered' });
+
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const fetchDeliveries = async () => {
+    const { data } = await supabase
+      .from('prescription_deliveries')
+      .select('*')
+      .order('expected_delivery', { ascending: true });
+    if (data) setDeliveries(data);
+  };
+
+  useEffect(() => {
+    fetchDeliveries();
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      setFamily(prev => ({ ...prev, author_name: currentUser.name }));
+    }
+  }, [currentUser]);
+
+  const compressAndGetBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 1000;
+          const MAX_HEIGHT = 1000;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          // Compress to JPEG with 0.7 quality to keep database load highly lightweight
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const base64Str = await compressAndGetBase64(file);
+      setFamily(prev => ({ ...prev, image_url: base64Str }));
+      setPreviewUrl(base64Str);
+    } catch (err: any) {
+      alert('相片載入或壓縮失敗：' + err.message);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -53,6 +134,7 @@ export const ManageView = () => {
     } else {
       showSuccess('家庭動態已成功發佈！');
       setFamily({ ...family, content: '', image_url: '' });
+      setPreviewUrl('');
     }
   };
 
@@ -94,6 +176,58 @@ export const ManageView = () => {
     }
   };
 
+  const handleDeliverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    const { error } = await supabase.from('prescription_deliveries').insert([{
+      order_number: deliveryForm.order_number,
+      items: deliveryForm.items,
+      expected_delivery: new Date(deliveryForm.expected_delivery).toISOString(),
+      status: deliveryForm.status
+    }]);
+    setLoading(false);
+    if (error) {
+      showSuccess(`發生錯誤：(${error.message})`);
+    } else {
+      showSuccess('處方藥配送訂單已成功新增！');
+      setDeliveryForm({ order_number: '', items: '', expected_delivery: '', status: 'ordered' });
+      fetchDeliveries();
+    }
+  };
+
+  const handleUpdateDeliveryStatus = async (id: any, newStatus: string) => {
+    // Optimistic UI update
+    setDeliveries(prev => prev.map(del => del.id === id ? { ...del, status: newStatus } : del));
+    const { error } = await supabase
+      .from('prescription_deliveries')
+      .update({ status: newStatus })
+      .eq('id', id);
+    if (error) {
+      console.error('Error updating status:', error);
+      alert('變更配送狀態失敗：' + error.message);
+      fetchDeliveries();
+    } else {
+      showSuccess('配送狀態已成功更新！');
+    }
+  };
+
+  const handleDeleteDelivery = async (id: any) => {
+    if (!window.confirm('確定要刪除此處方藥配送訂單嗎？')) return;
+    // Optimistic UI update
+    setDeliveries(prev => prev.filter(del => del.id !== id));
+    const { error } = await supabase
+      .from('prescription_deliveries')
+      .delete()
+      .eq('id', id);
+    if (error) {
+      console.error('Error deleting delivery:', error);
+      alert('刪除配送訂單失敗：' + error.message);
+      fetchDeliveries();
+    } else {
+      showSuccess('配送訂單已成功刪除！');
+    }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }}
@@ -124,7 +258,7 @@ export const ManageView = () => {
           <Users size={20} className="inline mr-2" />發佈家庭動態
         </button>
         <button onClick={() => setActiveTab('medical')} className={`px-6 py-3 rounded-full font-bold whitespace-nowrap transition-colors ${activeTab === 'medical' ? 'bg-primary text-on-primary' : 'bg-surface-container-high text-on-surface'}`}>
-          <Calendar size={20} className="inline mr-2" />新增看診/用藥
+          <Calendar size={20} className="inline mr-2" />新增看診/用藥/配送
         </button>
       </div>
 
@@ -168,12 +302,63 @@ export const ManageView = () => {
                 <label className="font-bold text-on-surface-variant">動態內容</label>
                 <textarea required rows={3} value={family.content} onChange={e => setFamily({...family, content: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" placeholder="輸入想對奶奶說的話..." />
               </div>
+              
+              {/* 本機相片上傳區 */}
               <div className="space-y-2">
-                <label className="font-bold text-on-surface-variant">相片連結 (可選)</label>
-                <input type="text" value={family.image_url} onChange={e => setFamily({...family, image_url: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" placeholder="https://..." />
+                <label className="font-bold text-on-surface-variant">選擇本機相片 (推薦，可直接上傳手機或電腦內圖片)</label>
+                <div className="flex gap-4 items-center">
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handleFileChange} 
+                    className="hidden" 
+                    id="family-image-file" 
+                  />
+                  <label 
+                    htmlFor="family-image-file" 
+                    className="flex-grow flex items-center justify-center gap-3 border-2 border-dashed border-outline-variant hover:border-primary rounded-xl p-4 cursor-pointer hover:bg-surface-container-high transition-all text-xl font-bold text-secondary"
+                  >
+                    {uploadingImage ? '⏳ 正在壓縮相片中...' : (previewUrl ? '✅ 已選擇相片 (點選可更換)' : '📁 選擇手機/電腦相片')}
+                  </label>
+                  {previewUrl && (
+                    <div className="relative">
+                      <img src={previewUrl} className="w-20 h-20 object-cover rounded-xl border-2 border-outline shadow-sm" alt="Preview" />
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setFamily(prev => ({ ...prev, image_url: '' }));
+                          setPreviewUrl('');
+                        }}
+                        className="absolute -top-2 -right-2 bg-error text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-md hover:bg-red-700 transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm text-on-surface-variant">支援 JPG, PNG，系統將自動進行輕量化無損壓縮以確保流暢顯示。</p>
+              </div>
+
+              {/* 外部連結選項 */}
+              <div className="space-y-2">
+                <label className="font-bold text-on-surface-variant">或是手動貼上相片網址 (選填)</label>
+                <input 
+                  type="text" 
+                  value={family.image_url.startsWith('data:') ? '' : family.image_url} 
+                  onChange={e => {
+                    setFamily({...family, image_url: e.target.value});
+                    setPreviewUrl(e.target.value);
+                  }} 
+                  className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" 
+                  placeholder="如：https://example.com/image.jpg" 
+                  disabled={family.image_url.startsWith('data:')}
+                />
+                {family.image_url.startsWith('data:') && (
+                  <p className="text-sm text-primary font-bold">✨ 已選用上方本機上傳圖片，欲貼上網址請先點按右上角 ✕ 移除圖片。</p>
+                )}
               </div>
             </div>
-            <button disabled={loading} className="w-full bg-primary text-on-primary h-[64px] rounded-xl font-bold text-2xl active:scale-95 transition-transform disabled:opacity-50">
+            <button disabled={loading || uploadingImage} className="w-full bg-primary text-on-primary h-[64px] rounded-xl font-bold text-2xl active:scale-95 transition-transform disabled:opacity-50">
               {loading ? '發佈中...' : '確認發佈'}
             </button>
           </form>
@@ -183,7 +368,7 @@ export const ManageView = () => {
           <div className="space-y-10">
             {/* Appointment Form */}
             <form onSubmit={handleAppointmentSubmit} className="space-y-6">
-              <h3 className="text-2xl font-bold border-b pb-2">新增看診預約</h3>
+              <h3 className="text-2xl font-bold border-b pb-2 text-primary">新增看診預約</h3>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -192,7 +377,26 @@ export const ManageView = () => {
                   </div>
                   <div className="space-y-2">
                     <label className="font-bold text-on-surface-variant">科別</label>
-                    <input required type="text" value={appointment.specialty} onChange={e => setAppointment({...appointment, specialty: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" placeholder="例如: 心臟內科" />
+                    <input 
+                      required 
+                      type="text" 
+                      value={appointment.specialty} 
+                      onChange={e => setAppointment({...appointment, specialty: e.target.value})} 
+                      className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" 
+                      placeholder="例如: 心臟內科" 
+                      list="specialty-options"
+                    />
+                    <datalist id="specialty-options">
+                      <option value="心臟內科" />
+                      <option value="新陳代謝科" />
+                      <option value="眼科" />
+                      <option value="牙科" />
+                      <option value="骨科" />
+                      <option value="神經內科" />
+                      <option value="家醫科" />
+                      <option value="耳鼻喉科" />
+                      <option value="皮膚科" />
+                    </datalist>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -209,7 +413,7 @@ export const ManageView = () => {
 
             {/* Medication Form */}
             <form onSubmit={handleMedicationSubmit} className="space-y-6">
-              <h3 className="text-2xl font-bold border-b pb-2">新增用藥排程</h3>
+              <h3 className="text-2xl font-bold border-b pb-2 text-secondary">新增用藥排程</h3>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -274,6 +478,99 @@ export const ManageView = () => {
                 {loading ? '儲存中...' : '確認新增用藥'}
               </button>
             </form>
+
+            <hr className="border-t-2 border-dashed border-surface-container-highest" />
+
+            {/* Prescription Form */}
+            <form onSubmit={handleDeliverySubmit} className="space-y-6">
+              <h3 className="text-2xl font-bold border-b pb-2 text-tertiary">新增處方藥配送訂單</h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="font-bold text-on-surface-variant">訂單編號</label>
+                    <input required type="text" value={deliveryForm.order_number} onChange={e => setDeliveryForm({...deliveryForm, order_number: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" placeholder="例如: RX99281" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="font-bold text-on-surface-variant">配送狀態</label>
+                    <select 
+                      value={deliveryForm.status} 
+                      onChange={e => setDeliveryForm({...deliveryForm, status: e.target.value})} 
+                      className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl appearance-none"
+                    >
+                      <option value="ordered">已訂購</option>
+                      <option value="delivering">配送中</option>
+                      <option value="delivered">已送達</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="font-bold text-on-surface-variant">藥物品項 / 配送內容</label>
+                  <input required type="text" value={deliveryForm.items} onChange={e => setDeliveryForm({...deliveryForm, items: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" placeholder="例如: 降血壓藥、維他命 B 群 (28天份)" />
+                </div>
+                <div className="space-y-2">
+                  <label className="font-bold text-on-surface-variant">預計送達時間</label>
+                  <input required type="datetime-local" value={deliveryForm.expected_delivery} onChange={e => setDeliveryForm({...deliveryForm, expected_delivery: e.target.value})} className="w-full p-4 rounded-xl border-2 border-outline-variant bg-surface focus:border-primary outline-none text-xl" />
+                </div>
+              </div>
+              <button disabled={loading} className="w-full bg-tertiary text-on-tertiary h-[64px] rounded-xl font-bold text-2xl active:scale-95 transition-transform disabled:opacity-50">
+                {loading ? '儲存中...' : '確認新增處方藥配送'}
+              </button>
+            </form>
+
+            <hr className="border-t-2 border-dashed border-surface-container-highest" />
+
+            {/* Prescription Deliveries List and Quick Edit */}
+            <div className="space-y-6">
+              <h3 className="text-2xl font-bold text-on-surface flex items-center gap-2">
+                <Truck className="text-secondary" /> 處方藥配送狀態管理
+              </h3>
+              {deliveries.length > 0 ? (
+                <div className="space-y-4">
+                  {deliveries.map((del) => (
+                    <div key={del.id} className="bg-surface border border-outline-variant rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-lg text-primary uppercase">#{del.order_number}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                            del.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                            del.status === 'delivering' ? 'bg-blue-100 text-blue-800' :
+                            'bg-amber-100 text-amber-800'
+                          }`}>
+                            {del.status === 'delivered' ? '已送達' : del.status === 'delivering' ? '配送中' : '已訂購'}
+                          </span>
+                        </div>
+                        <p className="font-bold text-lg">{del.items}</p>
+                        <p className="text-sm text-on-surface-variant">
+                          預計送達：{new Date(del.expected_delivery).toLocaleString('zh-TW')}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <select 
+                          value={del.status} 
+                          onChange={(e) => handleUpdateDeliveryStatus(del.id, e.target.value)}
+                          className="p-3 rounded-lg border border-outline-variant bg-surface font-bold text-base outline-none cursor-pointer focus:border-secondary"
+                        >
+                          <option value="ordered">已訂購</option>
+                          <option value="delivering">配送中</option>
+                          <option value="delivered">已送達</option>
+                        </select>
+                        <button 
+                          onClick={() => handleDeleteDelivery(del.id)}
+                          className="p-3 text-error hover:bg-error-container hover:text-on-error-container rounded-lg transition-colors"
+                          title="刪除訂單"
+                        >
+                          <Trash2 size={22} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-lg text-on-surface-variant bg-surface-container-high p-4 rounded-xl text-center font-bold">
+                  目前沒有任何處方藥配送訂單
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>

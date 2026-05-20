@@ -1,24 +1,40 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Calendar, PlusCircle, Bell, Check, Truck, Sun, Pill } from 'lucide-react';
+import { Calendar, PlusCircle, Bell, Check, Truck, Sun, Pill, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 export const MedicalView = () => {
   const [appointments, setAppointments] = useState<any[]>([]);
   const [medications, setMedications] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+
+  const fetchData = async () => {
+    // Fetch only upcoming appointments (time >= now)
+    const nowStr = new Date().toISOString();
+    const { data: aptData } = await supabase
+      .from('medical_appointments')
+      .select('*')
+      .gte('appointment_time', nowStr)
+      .order('appointment_time', { ascending: true })
+      .limit(1);
+    if (aptData) setAppointments(aptData);
+
+    const { data: medData } = await supabase
+      .from('medications')
+      .select('*')
+      .order('scheduled_time', { ascending: true });
+    if (medData) setMedications(medData);
+
+    // Fetch all active prescription deliveries
+    const { data: delData } = await supabase
+      .from('prescription_deliveries')
+      .select('*')
+      .order('expected_delivery', { ascending: true });
+    if (delData) setDeliveries(delData);
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      const { data: aptData } = await supabase.from('medical_appointments').select('*').order('appointment_time', { ascending: true }).limit(1);
-      if (aptData) setAppointments(aptData);
-
-      const { data: medData } = await supabase.from('medications').select('*').order('scheduled_time', { ascending: true });
-      if (medData) setMedications(medData);
-
-      const { data: delData } = await supabase.from('prescription_deliveries').select('*').order('expected_delivery', { ascending: true }).limit(1);
-      if (delData) setDeliveries(delData);
-    };
     fetchData();
   }, []);
 
@@ -35,6 +51,46 @@ export const MedicalView = () => {
   const getIcon = (iconName: string) => {
     if (iconName === 'sun') return Sun;
     return Pill;
+  };
+
+  const toggleTaken = async (id: any, currentTaken: boolean) => {
+    const newTaken = !currentTaken;
+    // Optimistic UI update
+    setMedications(prev => prev.map(med => med.id === id ? { ...med, taken: newTaken } : med));
+    
+    const { error } = await supabase
+      .from('medications')
+      .update({ taken: newTaken })
+      .eq('id', id);
+      
+    if (error) {
+      console.error('Error toggling medication state:', error);
+      // Rollback
+      setMedications(prev => prev.map(med => med.id === id ? { ...med, taken: currentTaken } : med));
+    }
+  };
+
+  const deleteMedication = async (id: any) => {
+    if (!window.confirm('確定要刪除此用藥排程嗎？')) return;
+    
+    // Optimistic UI update
+    setMedications(prev => prev.filter(med => med.id !== id));
+    
+    const { error } = await supabase
+      .from('medications')
+      .delete()
+      .eq('id', id);
+      
+    if (error) {
+      console.error('Error deleting medication:', error);
+      alert('刪除用藥排程失敗：' + error.message);
+      // Re-fetch
+      const { data: medData } = await supabase
+        .from('medications')
+        .select('*')
+        .order('scheduled_time', { ascending: true });
+      if (medData) setMedications(medData);
+    }
   };
 
   return (
@@ -76,15 +132,27 @@ export const MedicalView = () => {
       <section className="space-y-4">
         <div className="flex justify-between items-center">
           <h2 className="text-3xl font-extrabold">用藥排程</h2>
-          <button className="text-primary font-bold text-xl flex items-center gap-1">
-            <PlusCircle size={24} /> 修改
+          <button 
+            onClick={() => setIsEditing(!isEditing)}
+            className={`${isEditing ? 'text-tertiary' : 'text-primary'} font-bold text-xl flex items-center gap-1 hover:opacity-80 transition-all`}
+          >
+            <PlusCircle size={24} className={isEditing ? 'rotate-45 transition-transform' : 'transition-transform'} />
+            {isEditing ? '完成' : '修改'}
           </button>
         </div>
         <div className="space-y-4">
           {medications.length > 0 ? medications.map((med, i) => {
             const Icon = getIcon(med.icon);
             return (
-              <div key={i} className={`bg-surface border-2 rounded-xl p-6 flex items-center gap-6 ${!med.taken ? 'border-primary' : 'border-surface-container-highest shadow-sm'}`}>
+              <div key={i} className={`bg-surface border-2 rounded-xl p-6 flex items-center gap-6 transition-all duration-300 ${!med.taken ? 'border-primary' : 'border-surface-container-highest shadow-sm'}`}>
+                {isEditing && (
+                  <button 
+                    onClick={() => deleteMedication(med.id)}
+                    className="p-3 bg-error text-on-error rounded-full hover:bg-red-600 transition-colors shadow-sm"
+                  >
+                    <Trash2 size={24} />
+                  </button>
+                )}
                 <div className={`${med.color} w-16 h-16 rounded-full flex items-center justify-center text-white`}>
                   <Icon size={32} />
                 </div>
@@ -92,7 +160,10 @@ export const MedicalView = () => {
                   <p className="font-bold text-xl">{med.label}</p>
                   <p className="text-on-surface-variant text-xl">{med.description} • {formatTime(med.scheduled_time)}</p>
                 </div>
-                <button className={`w-[64px] h-[64px] border-4 rounded-full flex items-center justify-center transition-all ${!med.taken ? 'border-primary text-primary animate-pulse' : 'border-tertiary text-tertiary'}`}>
+                <button 
+                  onClick={() => toggleTaken(med.id, med.taken)}
+                  className={`w-[64px] h-[64px] border-4 rounded-full flex items-center justify-center transition-all ${!med.taken ? 'border-primary text-primary animate-pulse' : 'border-tertiary text-tertiary hover:opacity-80'}`}
+                >
                   {!med.taken ? <Bell size={32} /> : <Check size={32} />}
                 </button>
               </div>
@@ -108,30 +179,49 @@ export const MedicalView = () => {
 
       <section className="space-y-4">
         <h2 className="text-3xl font-extrabold">處方藥配送</h2>
-        {deliveries.length > 0 ? deliveries.map((delivery, i) => (
-          <div key={i} className="bg-surface border-2 border-surface-container-highest rounded-xl p-6 space-y-6 shadow-sm">
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="font-bold text-xl uppercase">訂單編號 {delivery.order_number}</p>
-                <p className="text-on-surface-variant text-xl">{delivery.items}</p>
+        {deliveries.length > 0 ? deliveries.map((delivery, i) => {
+          let progressWidth = 'w-1/3';
+          let orderedClass = 'text-secondary font-extrabold';
+          let deliveringClass = 'text-on-surface-variant opacity-30';
+          let deliveredClass = 'text-on-surface-variant opacity-30';
+
+          if (delivery.status === 'delivering') {
+            progressWidth = 'w-2/3';
+            orderedClass = 'text-secondary opacity-70';
+            deliveringClass = 'text-secondary font-extrabold';
+            deliveredClass = 'text-on-surface-variant opacity-30';
+          } else if (delivery.status === 'delivered') {
+            progressWidth = 'w-full';
+            orderedClass = 'text-secondary opacity-70';
+            deliveringClass = 'text-secondary opacity-70';
+            deliveredClass = 'text-secondary font-extrabold';
+          }
+
+          return (
+            <div key={i} className="bg-surface border-2 border-surface-container-highest rounded-xl p-6 space-y-6 shadow-sm">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="font-bold text-xl uppercase">訂單編號 {delivery.order_number}</p>
+                  <p className="text-on-surface-variant text-xl">{delivery.items}</p>
+                </div>
+                <Truck size={40} className="text-secondary" />
               </div>
-              <Truck size={40} className="text-secondary" />
+              <div className="space-y-3">
+                <div className="w-full bg-surface-container-highest h-4 rounded-full overflow-hidden">
+                  <div className={`bg-secondary h-full ${progressWidth} rounded-full transition-all duration-500`}></div>
+                </div>
+                <div className="flex justify-between text-lg">
+                  <span className={orderedClass}>已訂購</span>
+                  <span className={deliveringClass}>配送中</span>
+                  <span className={deliveredClass}>已送達</span>
+                </div>
+              </div>
+              <p className="bg-secondary-container p-4 rounded-lg text-on-secondary-container text-xl text-center border-2 border-secondary">
+                預計送達：<strong>{new Date(delivery.expected_delivery).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
+              </p>
             </div>
-            <div className="space-y-3">
-              <div className="w-full bg-surface-container-highest h-4 rounded-full overflow-hidden">
-                <div className="bg-secondary h-full w-3/4 rounded-full"></div>
-              </div>
-              <div className="flex justify-between text-on-surface-variant font-bold text-lg">
-                <span>已訂購</span>
-                <span className="text-secondary">配送中</span>
-                <span className="opacity-30">已送達</span>
-              </div>
-            </div>
-            <p className="bg-secondary-container p-4 rounded-lg text-on-secondary-container text-xl text-center border-2 border-secondary">
-              預計送達：<strong>{new Date(delivery.expected_delivery).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</strong>
-            </p>
-          </div>
-        )) : (
+          );
+        }) : (
           <div className="bg-surface border-2 border-dashed border-surface-container-highest rounded-xl p-8 flex flex-col items-center justify-center text-center shadow-sm">
             <Truck size={48} className="text-secondary opacity-50 mb-4" />
             <p className="text-xl font-bold text-on-surface-variant">目前沒有運送中的藥物</p>
