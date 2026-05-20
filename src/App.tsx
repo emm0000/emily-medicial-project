@@ -209,9 +209,6 @@ export default function App() {
   const handleSOSClick = async () => {
     if (!window.confirm(`🚨 【緊急警示確認】確定要觸發 SOS 求助系統，並向所有家人聊天室發出紅色警報嗎？`)) return;
     
-    // Redirect to family view (chat room) immediately
-    setView('family');
-    
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const sosMsgContent = `🚨【SOS 緊急救援警報】長者 ${currentUser.name} 於 ${timeStr} 按下了緊急求助按鈕！請所有家人與專業照護人員儘速確認長者身體安全、與所在位置狀況！`;
 
@@ -219,12 +216,14 @@ export default function App() {
       sender_name: currentUser.name,
       sender_avatar: currentUser.avatar,
       content: sosMsgContent,
-      is_me: false // categorize as dynamic other sender for immediate left-side red-bubble visualization, or fallback
+      is_me: false
     }]);
 
     if (error) {
       alert(`🚨 發送警示失敗：${error.message}`);
     } else {
+      // Redirect to family view (chat room) after successfully inserting the alarm message
+      setView('family');
       alert(`✅ SOS 緊急求助警報已發佈！已自動跳轉至家人聊天室。`);
     }
   };

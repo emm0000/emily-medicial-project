@@ -155,32 +155,43 @@ export const FamilyView = ({ currentUser }: { currentUser: UserProfile }) => {
         <h2 className="text-3xl font-extrabold mb-6">家人聊天室</h2>
         <div className="space-y-6 mb-6 max-h-[400px] overflow-y-auto pr-2 flex flex-col scroll-smooth">
           {messages.length > 0 ? messages.map((msg, i) => {
-            const isMe = msg.sender_name === currentUser.name || (msg.is_me && !msg.sender_name);
-            const senderAvatar = isMe ? currentUser.avatar : (msg.sender_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120&h=120');
-            const displayName = isMe ? '我' : (msg.sender_name || '未知家人');
+            const isSOS = msg.content && msg.content.includes('🚨【SOS 緊急救援警報】');
+            const isMe = !isSOS && (msg.sender_name === currentUser.name || (msg.is_me && !msg.sender_name));
+            const senderAvatar = isSOS 
+              ? 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&q=80&w=120&h=120' // premium glowing emergency red warning symbol avatar
+              : (isMe ? currentUser.avatar : (msg.sender_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=120&h=120'));
+            const displayName = isSOS ? '🚨 緊急系統警報' : (isMe ? '我' : (msg.sender_name || '未知家人'));
             
             return (
-              <div key={i} className={`flex items-start gap-4 ${isMe ? 'flex-row-reverse' : ''}`}>
-                <img 
-                  className="w-16 h-16 rounded-full border-2 border-primary object-cover shadow-sm" 
-                  src={senderAvatar} 
-                  alt="" 
-                />
-                <div className="flex flex-col max-w-[80%]">
-                  <span className={`text-secondary font-bold text-lg mb-1 ${isMe ? 'text-right mr-2' : 'ml-2'}`}>
+              <div key={i} className={`flex items-start gap-4 ${isMe ? 'flex-row-reverse' : ''} ${isSOS ? 'w-full justify-center px-4 my-2' : ''}`}>
+                {!isSOS && (
+                  <img 
+                    className="w-16 h-16 rounded-full border-2 border-primary object-cover shadow-sm" 
+                    src={senderAvatar} 
+                    alt="" 
+                  />
+                )}
+                <div className={`flex flex-col ${isSOS ? 'w-full max-w-2xl' : 'max-w-[80%]'}`}>
+                  <span className={`text-secondary font-bold text-lg mb-1 ${isSOS ? 'text-error text-center font-extrabold flex items-center justify-center gap-1.5' : isMe ? 'text-right mr-2' : 'ml-2'}`}>
                     {displayName}
                   </span>
-                  <div className={`p-4 rounded-2xl shadow-sm ${isMe ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container-lowest rounded-tl-none border border-surface-container-highest'}`}>
+                  <div className={`p-5 rounded-2xl shadow-md transition-all ${
+                    isSOS 
+                      ? 'bg-red-50 border-2 border-red-500 text-red-900 shadow-red-200 animate-pulse border-dashed text-center rounded-2xl'
+                      : isMe 
+                        ? 'bg-primary-container text-on-primary-container rounded-tr-none' 
+                        : 'bg-surface-container-lowest rounded-tl-none border border-surface-container-highest'
+                  }`}>
                     {msg.is_audio ? (
                       <div className="flex items-center gap-3">
                         <Mic size={24} className={isMe ? "text-white" : "text-primary"} />
                         <span className={`text-2xl ${isMe ? "text-white" : ""}`}>語音訊息 {msg.audio_duration}</span>
                       </div>
                     ) : (
-                      <p className="text-2xl whitespace-pre-wrap">{msg.content}</p>
+                      <p className={`text-2xl whitespace-pre-wrap leading-relaxed ${isSOS ? 'font-black text-red-700 tracking-wide' : ''}`}>{msg.content}</p>
                     )}
                   </div>
-                  <span className={`text-sm mt-1 text-on-surface-variant font-bold ${isMe ? 'text-right mr-2' : 'ml-2'}`}>
+                  <span className={`text-sm mt-1 text-on-surface-variant font-bold ${isSOS ? 'text-center' : isMe ? 'text-right mr-2' : 'ml-2'}`}>
                     {formatTime(msg.created_at)}
                   </span>
                 </div>
