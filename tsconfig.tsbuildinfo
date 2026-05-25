@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/lib/supabase.ts","./src/views/familyview.tsx","./src/views/healthreportview.tsx","./src/views/healthview.tsx","./src/views/homeview.tsx","./src/views/interactivetourview.tsx","./src/views/manageview.tsx","./src/views/medicalview.tsx"],"version":"5.9.3"}
