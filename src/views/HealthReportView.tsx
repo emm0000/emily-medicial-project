@@ -4,7 +4,7 @@ import { ArrowLeft, TrendingUp, TrendingDown, Minus, Calendar, Footprints, Heart
 import { supabase } from '../lib/supabase';
 
 interface HealthReportViewProps {
-  setView: (view: string) => void;
+  setView: (view: any) => void;
 }
 
 export const HealthReportView = ({ setView }: HealthReportViewProps) => {
