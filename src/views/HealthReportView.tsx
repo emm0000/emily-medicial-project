@@ -26,6 +26,34 @@ export const HealthReportView = ({ setView }: HealthReportViewProps) => {
     setLoading(false);
   };
 
+  const exportHealthReport = () => {
+    if (history.length === 0) {
+      alert('目前沒有任何健康數據可以匯出！');
+      return;
+    }
+
+    // Generate CSV
+    const headers = ['記錄時間', '今日步數', '目標步數', '心率 (BPM)', '收縮壓 (高壓)', '舒張壓 (低壓)'];
+    const rows = history.map(item => [
+      new Date(item.created_at).toLocaleString('zh-TW'),
+      item.steps,
+      item.target_steps,
+      item.heart_rate,
+      item.systolic,
+      item.diastolic
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `健康報告_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString('zh-TW', { month: 'short', day: 'numeric', weekday: 'short' });
@@ -178,9 +206,12 @@ export const HealthReportView = ({ setView }: HealthReportViewProps) => {
           </section>
 
           {/* Share Button */}
-          <button className="w-full bg-primary text-on-primary text-2xl font-extrabold py-5 rounded-xl shadow-lg flex items-center justify-center gap-4 transition-all hover:brightness-110 active:scale-[0.98]">
+          <button 
+            onClick={exportHealthReport}
+            className="w-full bg-primary text-on-primary text-2xl font-extrabold py-5 rounded-xl shadow-lg flex items-center justify-center gap-4 transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer border-none"
+          >
             <Share2 size={28} strokeWidth={3} className="text-white" />
-            <span className="text-white">匯出報告給醫師</span>
+            <span className="text-white">匯出報告給醫師 (CSV)</span>
           </button>
         </>
       )}

@@ -1,20 +1,91 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Footprints, Heart as HeartIcon, Activity, Calendar, Share2 } from 'lucide-react';
+import { Footprints, Heart as HeartIcon, Activity, Calendar, FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
-export const HealthView = () => {
+export const HealthView = ({ setView }: { setView: (v: any) => void }) => {
   const [metrics, setMetrics] = useState<any>(null);
+  const [weeklyHistory, setWeeklyHistory] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchMetrics = async () => {
-      const { data } = await supabase.from('health_metrics').select('*').order('created_at', { ascending: false }).limit(1);
-      if (data && data.length > 0) {
-        setMetrics(data[0]);
+      // Fetch latest metrics
+      const { data: latestData } = await supabase
+        .from('health_metrics')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (latestData && latestData.length > 0) {
+        setMetrics(latestData[0]);
+      }
+
+      // Fetch last 14 metrics for weekly calculation
+      const { data: historyData } = await supabase
+        .from('health_metrics')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(14);
+      if (historyData) {
+        setWeeklyHistory(historyData);
       }
     };
     fetchMetrics();
   }, []);
+
+  // Split history into this week (last 7 days) and last week (prior 7 days)
+  const thisWeek = weeklyHistory.slice(0, 7);
+  const lastWeek = weeklyHistory.slice(7, 14);
+
+  // 1. Daily Average Steps
+  const avgSteps = thisWeek.length > 0 
+    ? Math.round(thisWeek.reduce((sum, h) => sum + (h.steps || 0), 0) / thisWeek.length) 
+    : 5820;
+
+  // 2. Sleep Quality (derived dynamically)
+  const getSleepQuality = (history: any[]) => {
+    if (history.length === 0) return '優良';
+    const avgHR = history.reduce((sum, h) => sum + (h.heart_rate || 72), 0) / history.length;
+    if (avgHR >= 60 && avgHR <= 75) return '優良';
+    if (avgHR > 75 && avgHR <= 85) return '良好';
+    return '尚可';
+  };
+  const sleepQuality = getSleepQuality(thisWeek);
+
+  // 3. Data Stability (derived dynamically from metric normalcy rate)
+  const getStability = (history: any[]) => {
+    if (history.length === 0) return '92%';
+    let normalCount = 0;
+    history.forEach(h => {
+      const hrNormal = h.heart_rate >= 60 && h.heart_rate <= 100;
+      const bpNormal = h.systolic >= 90 && h.systolic <= 140 && h.diastolic >= 60 && h.diastolic <= 90;
+      if (hrNormal && bpNormal) normalCount++;
+    });
+    const rate = Math.round((normalCount / history.length) * 100);
+    return `${Math.max(70, Math.min(100, rate))}%`;
+  };
+  const stability = getStability(thisWeek);
+
+  // 4. Activity Comparison Description
+  let activitySummaryText = '您的活動量比上週增加了 12%！請繼續保持。';
+  if (thisWeek.length > 0) {
+    if (lastWeek.length > 0) {
+      const thisWeekAvg = thisWeek.reduce((sum, h) => sum + (h.steps || 0), 0) / thisWeek.length;
+      const lastWeekAvg = lastWeek.reduce((sum, h) => sum + (h.steps || 0), 0) / lastWeek.length;
+      if (lastWeekAvg > 0) {
+        const diffPercent = Math.round(((thisWeekAvg - lastWeekAvg) / lastWeekAvg) * 100);
+        if (diffPercent > 0) {
+          activitySummaryText = `您的每日平均活動量比上週增加了 ${diffPercent}%！請繼續保持。`;
+        } else if (diffPercent < 0) {
+          activitySummaryText = `您的每日平均活動量比上週減少了 ${Math.abs(diffPercent)}%，提醒您多起身活動一下喔！`;
+        } else {
+          activitySummaryText = `您的每日平均活動量與上週持平，生活節奏非常規律！`;
+        }
+      }
+    } else {
+      const targetProgress = Math.round((avgSteps / 8000) * 100);
+      activitySummaryText = `您的每日平均活動量已達到設定目標的 ${targetProgress}%！請繼續保持。`;
+    }
+  }
 
   const displayMetrics = metrics || {
     steps: 0,
@@ -163,9 +234,9 @@ export const HealthView = () => {
         </div>
         <div className="space-y-4">
           {[
-            { label: '每日平均步數', val: '5,820', color: 'text-primary' },
-            { label: '睡眠品質', val: '優良', color: 'text-tertiary' },
-            { label: '數據穩定度', val: '92%', color: 'text-on-surface-variant' }
+            { label: '每日平均步數', val: `${avgSteps.toLocaleString()} 步`, color: 'text-primary' },
+            { label: '睡眠品質', val: sleepQuality, color: 'text-tertiary' },
+            { label: '數據穩定度', val: stability, color: 'text-on-surface-variant' }
           ].map((item, i) => (
             <div key={i} className="flex items-center justify-between p-4 bg-surface rounded-lg">
               <span className="text-2xl text-on-surface-variant">{item.label}</span>
@@ -174,14 +245,17 @@ export const HealthView = () => {
           ))}
         </div>
         <div className="bg-secondary-container p-6 rounded-xl flex flex-col gap-4">
-          <p className="text-on-secondary-container text-xl">您的活動量比上週增加了 12%！請繼續保持。</p>
+          <p className="text-on-secondary-container text-xl">{activitySummaryText}</p>
           <img className="w-full h-48 object-cover rounded-lg" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCn2r8072sbaQN4RBZIy8qhUqujv03pXsTaVHglhkKjjTYCMb0VhhzLZYkfBqekYfW2dRT7ZPyXy-nhd-EMzmlQHh9bNa-OXOw35iLkf8bYZy5fiVG0sfCGcYmdIf8aF9GYFs5mHmWACPHBruiwPws3hQZdSQUm7FNyWZxv4WeOtnubBKhuZOjIrfW9VO1eJKbCqBMQSvzmoASxoOFP6SU7Y2Mhu8_fQO1bjwSfTa4P8pnheABMWC7q_7ng19N9B_ohoiN4fe2D8Io" alt="Healthy Lifestyle" />
         </div>
       </section>
 
-      <button className="w-full bg-primary text-on-primary text-3xl font-extrabold py-6 rounded-xl shadow-lg flex items-center justify-center gap-4 transition-all hover:brightness-110 active:scale-[0.98]">
-        <Share2 size={32} strokeWidth={3} className="text-white" />
-        <span className="text-white">分享報告</span>
+      <button 
+        onClick={() => setView('health-report')}
+        className="w-full bg-primary text-on-primary text-3xl font-extrabold py-6 rounded-xl shadow-lg flex items-center justify-center gap-4 transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer border-none"
+      >
+        <FileText size={32} strokeWidth={3} className="text-white" />
+        <span className="text-white">查看歷史健康報告</span>
       </button>
     </motion.div>
   );

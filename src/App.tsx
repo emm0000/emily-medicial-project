@@ -8,9 +8,10 @@ import { HealthView } from './views/HealthView';
 import { MedicalView } from './views/MedicalView';
 import { ManageView } from './views/ManageView';
 import { InteractiveTourView } from './views/InteractiveTourView';
+import { HealthReportView } from './views/HealthReportView';
 import { Settings } from 'lucide-react';
 
-type View = 'home' | 'health' | 'family' | 'medical' | 'manage';
+type View = 'home' | 'health' | 'family' | 'medical' | 'manage' | 'health-report';
 
 export interface UserProfile {
   name: string;
@@ -102,7 +103,7 @@ const BottomNav = ({ currentView, setView }: { currentView: View, setView: (v: V
     <nav className="fixed bottom-0 left-0 right-0 h-24 bg-surface border-t-2 border-surface-container-highest flex justify-around items-center px-4 z-50">
       {items.map((item) => {
         const Icon = item.icon;
-        const isActive = currentView === item.id;
+        const isActive = currentView === item.id || (item.id === 'health' && currentView === 'health-report');
         return (
           <button
             key={item.id}
@@ -412,7 +413,8 @@ export default function App() {
               onTourClick={() => setIsTourOpen(true)}
             />
           )}
-          {currentView === 'health' && <HealthView key="health" />}
+          {currentView === 'health' && <HealthView key="health" setView={setView} />}
+          {currentView === 'health-report' && <HealthReportView key="health-report" setView={setView} />}
           {currentView === 'family' && <FamilyView key="family" currentUser={currentUser} />}
           {currentView === 'medical' && <MedicalView key="medical" currentUser={currentUser} />}
           {currentView === 'manage' && <ManageView key="manage" currentUser={currentUser} />}
