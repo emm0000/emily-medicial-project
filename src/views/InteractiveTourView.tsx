@@ -162,27 +162,63 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
     setNarrationFinished(false);
     if (isMuted || !synthRef.current) {
       setNarrationFinished(true);
-      return;
+      return () => {};
     }
+    
+    let isCancelled = false;
+    let safetyTimeout: any;
+
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.05;
       utterance.pitch = 1.08;
       
+      // Prevent GC bug: bind to window
+      if (typeof window !== 'undefined') {
+        (window as any)._activeUtterances = (window as any)._activeUtterances || [];
+        (window as any)._activeUtterances.push(utterance);
+      }
+      
+      const cleanUtterance = () => {
+        if (typeof window !== 'undefined' && (window as any)._activeUtterances) {
+          (window as any)._activeUtterances = (window as any)._activeUtterances.filter((u: any) => u !== utterance);
+        }
+      };
+
       utterance.onend = () => {
+        if (isCancelled) return;
+        cleanUtterance();
         setNarrationFinished(true);
       };
-      utterance.onerror = () => {
+      
+      utterance.onerror = (err) => {
+        console.warn('Speech error event:', err);
+        if (isCancelled) return;
+        cleanUtterance();
         setNarrationFinished(true);
       };
 
       utteranceRef.current = utterance;
       synthRef.current.speak(utterance);
+      
+      // Safety timeout: if speech fails to finish, force finish after duration + 4 seconds
+      const safetyTime = TOUR_STEPS[currentStep].duration + 4000;
+      safetyTimeout = setTimeout(() => {
+        if (isCancelled) return;
+        cleanUtterance();
+        setNarrationFinished(true);
+      }, safetyTime);
+
     } catch (e) {
       console.warn('TTS Synthesis blocked or failed:', e);
       setNarrationFinished(true);
     }
+
+    return () => {
+      isCancelled = true;
+      if (safetyTimeout) clearTimeout(safetyTimeout);
+    };
   };
 
   const stopSpeech = () => {
@@ -195,17 +231,20 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
 
   // Trigger speech synthesis
   useEffect(() => {
+    let cancelSpeech: (() => void) | undefined;
     if (isPlaying && !isInteractiveMode) {
-      speakNarration(TOUR_STEPS[currentStep].narration);
+      cancelSpeech = speakNarration(TOUR_STEPS[currentStep].narration);
     } else {
       stopSpeech();
+      setNarrationFinished(true);
     }
     return () => {
       stopSpeech();
+      if (cancelSpeech) cancelSpeech();
     };
   }, [isPlaying, currentStep, isInteractiveMode]);
 
-  // Main playback timer and slide advancement loop
+  // Main playback progress bar loop
   useEffect(() => {
     if (isInteractiveMode || !isPlaying) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -221,34 +260,41 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
       
       if (newProgress >= 100) {
         if (!narrationFinished && !isMuted) {
-          newProgress = 99; // Hold progress at 99% waiting for narration to finish
+          newProgress = 99; // Hold visual progress at 99% until speaking is done
         } else {
           newProgress = 100;
         }
       }
       
-      setProgress(newProgress);
-
-      if (newProgress >= 100 || (newProgress >= 99 && narrationFinished)) {
-        clearInterval(timerRef.current);
-        // Delay slightly after speech ends for a natural pause before swooshing
-        const transitionTimeout = setTimeout(() => {
-          if (currentStep < TOUR_STEPS.length - 1) {
-            playSynthSound('swoosh');
-            setCurrentStep(prev => prev + 1);
-            setProgress(0);
-          } else {
-            setIsPlaying(false);
-          }
-        }, 800);
-        return () => clearTimeout(transitionTimeout);
-      }
-    }, 60);
+      setProgress(Math.min(newProgress, 100));
+    }, 50);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, currentStep, isInteractiveMode, narrationFinished, isMuted]);
+
+  // Slide transition controller
+  useEffect(() => {
+    if (isInteractiveMode || !isPlaying) return;
+
+    const isStepDone = progress >= 99 && (narrationFinished || isMuted);
+    
+    if (isStepDone) {
+      const transitionTimer = setTimeout(() => {
+        setProgress(0);
+        if (currentStep < TOUR_STEPS.length - 1) {
+          playSynthSound('swoosh');
+          setCurrentStep(prev => prev + 1);
+        } else {
+          setIsPlaying(false);
+          setProgress(100);
+        }
+      }, 800);
+      
+      return () => clearTimeout(transitionTimer);
+    }
+  }, [progress, narrationFinished, isMuted, currentStep, isPlaying, isInteractiveMode]);
 
   // Handle Mute changes
   useEffect(() => {
