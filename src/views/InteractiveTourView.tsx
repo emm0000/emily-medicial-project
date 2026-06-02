@@ -80,9 +80,8 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
   const [activeRole, setActiveRole] = useState<'grandson' | 'grandma' | 'nurse'>('grandson');
   const [isTyping, setIsTyping] = useState(false);
   const [narrationFinished, setNarrationFinished] = useState(false);
+  const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0);
   
-  const stepStartTime = useRef<number>(Date.now());
-  const timerRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -157,6 +156,24 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const getSentences = (text: string) => {
+    const chars = ['。', '！', '；', '？', '，', ',', '!'];
+    const sentences: string[] = [];
+    let current = '';
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      current += char;
+      if (chars.includes(char)) {
+        sentences.push(current.trim());
+        current = '';
+      }
+    }
+    if (current.trim().length > 0) {
+      sentences.push(current.trim());
+    }
+    return sentences.filter(s => s.length > 0);
+  };
+
   const speakNarration = (text: string) => {
     stopSpeech();
     setNarrationFinished(false);
@@ -166,12 +183,11 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
     }
     
     let isCancelled = false;
-    let safetyTimeout: any;
 
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
-      utterance.rate = 1.05;
+      utterance.rate = 1.02;
       utterance.pitch = 1.08;
       
       // Prevent GC bug: bind to window
@@ -189,35 +205,34 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
       utterance.onend = () => {
         if (isCancelled) return;
         cleanUtterance();
-        setNarrationFinished(true);
+        
+        const sentences = getSentences(TOUR_STEPS[currentStep].narration);
+        if (currentSentenceIndex < sentences.length - 1) {
+          setCurrentSentenceIndex(prev => prev + 1);
+        } else {
+          setNarrationFinished(true);
+        }
       };
       
       utterance.onerror = (err) => {
         console.warn('Speech error event:', err);
         if (isCancelled) return;
         cleanUtterance();
-        setNarrationFinished(true);
+        stopSpeech();
+        setIsPlaying(false); // Stop autoplay, stay on current page
       };
 
       utteranceRef.current = utterance;
       synthRef.current.speak(utterance);
-      
-      // Safety timeout: if speech fails to finish, force finish after duration + 4 seconds
-      const safetyTime = TOUR_STEPS[currentStep].duration + 4000;
-      safetyTimeout = setTimeout(() => {
-        if (isCancelled) return;
-        cleanUtterance();
-        setNarrationFinished(true);
-      }, safetyTime);
 
     } catch (e) {
-      console.warn('TTS Synthesis blocked or failed:', e);
+      console.warn('TTS Synthesis blocked or failed to start:', e);
       setNarrationFinished(true);
     }
 
     return () => {
       isCancelled = true;
-      if (safetyTimeout) clearTimeout(safetyTimeout);
+      stopSpeech();
     };
   };
 
@@ -229,60 +244,80 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // Trigger speech synthesis
+  // Reset indices on step changes
   useEffect(() => {
-    let cancelSpeech: (() => void) | undefined;
-    if (isPlaying && !isInteractiveMode) {
-      cancelSpeech = speakNarration(TOUR_STEPS[currentStep].narration);
-    } else {
-      stopSpeech();
-      setNarrationFinished(true);
-    }
-    return () => {
-      stopSpeech();
-      if (cancelSpeech) cancelSpeech();
-    };
-  }, [isPlaying, currentStep, isInteractiveMode]);
+    setCurrentSentenceIndex(0);
+    setNarrationFinished(false);
+    setProgress(0);
+  }, [currentStep]);
 
-  // Main playback progress bar loop
+  // Trigger speech synthesis or simulation of sentences
   useEffect(() => {
     if (isInteractiveMode || !isPlaying) {
-      if (timerRef.current) clearInterval(timerRef.current);
+      stopSpeech();
       return;
     }
 
-    stepStartTime.current = Date.now() - (progress / 100) * TOUR_STEPS[currentStep].duration;
-    
-    timerRef.current = setInterval(() => {
-      const elapsed = Date.now() - stepStartTime.current;
-      const total = TOUR_STEPS[currentStep].duration;
-      let newProgress = (elapsed / total) * 100;
-      
-      if (newProgress >= 100) {
-        if (!narrationFinished && !isMuted) {
-          newProgress = 99; // Hold visual progress at 99% until speaking is done
-        } else {
-          newProgress = 100;
-        }
-      }
-      
-      setProgress(Math.min(newProgress, 100));
-    }, 50);
+    const sentences = getSentences(TOUR_STEPS[currentStep].narration);
+    const text = sentences[currentSentenceIndex];
 
+    if (!text) {
+      setNarrationFinished(true);
+      return;
+    }
+
+    setNarrationFinished(false);
+
+    if (isMuted || !synthRef.current) {
+      // Simulate reading time when muted (average 220ms per character, minimum 2 seconds)
+      const simulatedDuration = Math.max(2000, text.length * 220);
+      const timer = setTimeout(() => {
+        if (currentSentenceIndex < sentences.length - 1) {
+          setCurrentSentenceIndex(prev => prev + 1);
+        } else {
+          setNarrationFinished(true);
+        }
+      }, simulatedDuration);
+      return () => clearTimeout(timer);
+    }
+
+    // Speaking mode
+    const cancelSpeech = speakNarration(text);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (cancelSpeech) cancelSpeech();
     };
-  }, [isPlaying, currentStep, isInteractiveMode, narrationFinished, isMuted]);
+  }, [isPlaying, currentStep, currentSentenceIndex, isInteractiveMode, isMuted]);
+
+  // Smooth progress bar animator
+  useEffect(() => {
+    if (isInteractiveMode || !isPlaying) return;
+
+    const sentences = getSentences(TOUR_STEPS[currentStep].narration);
+    const baseProgress = (currentSentenceIndex / sentences.length) * 100;
+    const targetProgress = ((currentSentenceIndex + 1) / sentences.length) * 100;
+
+    const stepInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev < targetProgress) {
+          const delta = (targetProgress - baseProgress) / 50; // increment over ~3 seconds per sentence
+          return Math.min(prev + delta, targetProgress);
+        }
+        return prev;
+      });
+    }, 60);
+
+    return () => clearInterval(stepInterval);
+  }, [currentStep, currentSentenceIndex, isPlaying, isInteractiveMode]);
 
   // Slide transition controller
   useEffect(() => {
     if (isInteractiveMode || !isPlaying) return;
 
-    const isStepDone = progress >= 99 && (narrationFinished || isMuted);
+    const isSpeechSpeaking = typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking;
+    const isStepDone = progress >= 99.9 && narrationFinished && !isSpeechSpeaking;
     
     if (isStepDone) {
       const transitionTimer = setTimeout(() => {
-        setProgress(0);
         if (currentStep < TOUR_STEPS.length - 1) {
           playSynthSound('swoosh');
           setCurrentStep(prev => prev + 1);
@@ -290,102 +325,65 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
           setIsPlaying(false);
           setProgress(100);
         }
-      }, 800);
+      }, 1000); // 1 second natural pause after step finishes
       
       return () => clearTimeout(transitionTimer);
     }
-  }, [progress, narrationFinished, isMuted, currentStep, isPlaying, isInteractiveMode]);
+  }, [progress, narrationFinished, currentStep, isPlaying, isInteractiveMode]);
 
   // Handle Mute changes
   useEffect(() => {
     if (isMuted) {
       stopSpeech();
       setNarrationFinished(true);
-    } else if (isPlaying && !isInteractiveMode) {
-      speakNarration(TOUR_STEPS[currentStep].narration);
     }
   }, [isMuted]);
 
-  // Dynamic animations simulation inside the mockup screen
+  // Dynamic animations simulation inside the mockup screen synchronized with sentence progression
   useEffect(() => {
     setSimulatedMedsTaken(false);
     setShowSOSAlert(false);
     setSosProgress(0);
     setIsTyping(false);
-    
+    setChatMessages([]);
+
     if (currentStep === 1) {
-      // Step 1: SOS progress simulation
-      const interval = setInterval(() => {
-        setSosProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 5;
-        });
-      }, 150);
-
-      const alertTimeout = setTimeout(() => {
-        playSynthSound('siren');
+      if (currentSentenceIndex === 0) {
+        setSosProgress(40);
+      } else if (currentSentenceIndex >= 1) {
+        setSosProgress(100);
         setShowSOSAlert(true);
-      }, 2500);
-
-      return () => {
-        clearInterval(interval);
-        clearTimeout(alertTimeout);
-      };
+        playSynthSound('siren');
+      }
     } else if (currentStep === 2) {
-      // Step 2: Medication Checkmark Auto-trigger
-      const t = setTimeout(() => {
-        playSynthSound('success');
+      if (currentSentenceIndex >= 1) {
         setSimulatedMedsTaken(true);
-      }, 3500);
-      return () => clearTimeout(t);
+        playSynthSound('success');
+      }
     } else if (currentStep === 3) {
-      // Step 3: Interactive Family Chat Sequential Flow
-      setChatMessages([]);
       const msgs = [
         '陳小明：奶奶，今天血壓量了嗎？❤️',
         '王春花 (奶奶)：量過囉！收縮壓 125，小明不用擔心 👵',
         '林美玲 (護理師)：奶奶下午的手工香包課做得超棒喔！🌸'
       ];
-      
-      let chatTimer: any;
-      let msgIndex = 0;
-
-      const triggerNextMessage = () => {
-        if (msgIndex < msgs.length) {
-          setIsTyping(true);
-          chatTimer = setTimeout(() => {
-            setIsTyping(false);
-            setChatMessages(prev => [...prev, msgs[msgIndex]]);
-            playSynthSound('click');
-            msgIndex++;
-            // schedule next message
-            chatTimer = setTimeout(triggerNextMessage, 1500);
-          }, 1200);
-        }
-      };
-
-      chatTimer = setTimeout(triggerNextMessage, 1000);
-      return () => clearTimeout(chatTimer);
+      // Show messages up to currentSentenceIndex
+      const visibleMsgs = msgs.slice(0, currentSentenceIndex + 1);
+      setChatMessages(visibleMsgs);
+      if (currentSentenceIndex < msgs.length - 1) {
+        setIsTyping(true);
+      }
     } else if (currentStep === 5) {
-      // Step 5: Account swap automation
-      setActiveRole('grandson');
-      const t1 = setTimeout(() => {
-        playSynthSound('click');
+      if (currentSentenceIndex === 0) {
+        setActiveRole('grandson');
+      } else if (currentSentenceIndex === 1) {
         setActiveRole('grandma');
-      }, 2800);
-      const t2 = setTimeout(() => {
         playSynthSound('click');
+      } else if (currentSentenceIndex >= 2) {
         setActiveRole('nurse');
-      }, 6000);
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-      };
+        playSynthSound('click');
+      }
     }
-  }, [currentStep]);
+  }, [currentStep, currentSentenceIndex]);
 
   const handlePlayPause = () => {
     playSynthSound('click');
@@ -988,7 +986,20 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <p className="text-base md:text-lg text-slate-100 font-bold leading-relaxed">
-                  {TOUR_STEPS[currentStep].narration}
+                  {getSentences(TOUR_STEPS[currentStep].narration).map((sentence, idx) => (
+                    <span 
+                      key={idx} 
+                      className={`transition-all duration-300 mr-1.5 ${
+                        idx === currentSentenceIndex 
+                          ? 'text-indigo-400 font-extrabold underline decoration-indigo-500/40 decoration-2 underline-offset-4' 
+                          : idx < currentSentenceIndex 
+                            ? 'text-slate-400 font-bold' 
+                            : 'text-slate-500/50'
+                      }`}
+                    >
+                      {sentence}
+                    </span>
+                  ))}
                 </p>
               </div>
             </motion.div>
@@ -1021,14 +1032,24 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
                 {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
               </button>
 
-              <button
-                disabled={isInteractiveMode}
-                onClick={handleNext}
-                className="p-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-2xl transition-all active:scale-95 disabled:opacity-30 disabled:scale-100 border border-slate-700 cursor-pointer"
-                title="下一幕"
-              >
-                <ArrowRight size={18} />
-              </button>
+              {currentStep === TOUR_STEPS.length - 1 ? (
+                <button
+                  onClick={onClose}
+                  className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-xs transition-all active:scale-95 border border-emerald-500 cursor-pointer shadow-lg hover:shadow-emerald-500/20"
+                  title="完成導覽"
+                >
+                  完成
+                </button>
+              ) : (
+                <button
+                  disabled={isInteractiveMode}
+                  onClick={handleNext}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-2xl transition-all active:scale-95 disabled:opacity-30 disabled:scale-100 border border-slate-700 cursor-pointer"
+                  title="下一幕"
+                >
+                  <ArrowRight size={18} />
+                </button>
+              )}
             </div>
 
             {/* Subtitle Progress Scrubber */}
