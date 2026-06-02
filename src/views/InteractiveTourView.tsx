@@ -79,6 +79,7 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
   const [sosProgress, setSosProgress] = useState(0);
   const [activeRole, setActiveRole] = useState<'grandson' | 'grandma' | 'nurse'>('grandson');
   const [isTyping, setIsTyping] = useState(false);
+  const [narrationFinished, setNarrationFinished] = useState(false);
   
   const stepStartTime = useRef<number>(Date.now());
   const timerRef = useRef<any>(null);
@@ -158,16 +159,29 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
 
   const speakNarration = (text: string) => {
     stopSpeech();
-    if (isMuted || !synthRef.current) return;
+    setNarrationFinished(false);
+    if (isMuted || !synthRef.current) {
+      setNarrationFinished(true);
+      return;
+    }
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.05;
       utterance.pitch = 1.08;
+      
+      utterance.onend = () => {
+        setNarrationFinished(true);
+      };
+      utterance.onerror = () => {
+        setNarrationFinished(true);
+      };
+
       utteranceRef.current = utterance;
       synthRef.current.speak(utterance);
     } catch (e) {
       console.warn('TTS Synthesis blocked or failed:', e);
+      setNarrationFinished(true);
     }
   };
 
@@ -179,26 +193,46 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // Main playback timer loop
+  // Trigger speech synthesis
   useEffect(() => {
-    stopSpeech();
-    if (isInteractiveMode) {
+    if (isPlaying && !isInteractiveMode) {
+      speakNarration(TOUR_STEPS[currentStep].narration);
+    } else {
+      stopSpeech();
+    }
+    return () => {
+      stopSpeech();
+    };
+  }, [isPlaying, currentStep, isInteractiveMode]);
+
+  // Main playback timer and slide advancement loop
+  useEffect(() => {
+    if (isInteractiveMode || !isPlaying) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
 
-    if (isPlaying) {
-      speakNarration(TOUR_STEPS[currentStep].narration);
-      stepStartTime.current = Date.now() - (progress / 100) * TOUR_STEPS[currentStep].duration;
+    stepStartTime.current = Date.now() - (progress / 100) * TOUR_STEPS[currentStep].duration;
+    
+    timerRef.current = setInterval(() => {
+      const elapsed = Date.now() - stepStartTime.current;
+      const total = TOUR_STEPS[currentStep].duration;
+      let newProgress = (elapsed / total) * 100;
       
-      timerRef.current = setInterval(() => {
-        const elapsed = Date.now() - stepStartTime.current;
-        const total = TOUR_STEPS[currentStep].duration;
-        const newProgress = Math.min((elapsed / total) * 100, 100);
-        setProgress(newProgress);
+      if (newProgress >= 100) {
+        if (!narrationFinished && !isMuted) {
+          newProgress = 99; // Hold progress at 99% waiting for narration to finish
+        } else {
+          newProgress = 100;
+        }
+      }
+      
+      setProgress(newProgress);
 
-        if (newProgress >= 100) {
-          clearInterval(timerRef.current);
+      if (newProgress >= 100 || (newProgress >= 99 && narrationFinished)) {
+        clearInterval(timerRef.current);
+        // Delay slightly after speech ends for a natural pause before swooshing
+        const transitionTimeout = setTimeout(() => {
           if (currentStep < TOUR_STEPS.length - 1) {
             playSynthSound('swoosh');
             setCurrentStep(prev => prev + 1);
@@ -206,21 +240,21 @@ export function InteractiveTourView({ onClose }: { onClose: () => void }) {
           } else {
             setIsPlaying(false);
           }
-        }
-      }, 30);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
+        }, 800);
+        return () => clearTimeout(transitionTimeout);
+      }
+    }, 60);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, currentStep, isInteractiveMode]);
+  }, [isPlaying, currentStep, isInteractiveMode, narrationFinished, isMuted]);
 
   // Handle Mute changes
   useEffect(() => {
     if (isMuted) {
       stopSpeech();
+      setNarrationFinished(true);
     } else if (isPlaying && !isInteractiveMode) {
       speakNarration(TOUR_STEPS[currentStep].narration);
     }
